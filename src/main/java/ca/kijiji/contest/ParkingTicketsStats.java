@@ -9,9 +9,18 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+
+import com.lmax.disruptor.ClaimStrategy;
+import com.lmax.disruptor.EventHandler;
+import com.lmax.disruptor.RingBuffer;
+import com.lmax.disruptor.SingleThreadedClaimStrategy;
+import com.lmax.disruptor.WaitStrategy;
+import com.lmax.disruptor.YieldingWaitStrategy;
+import com.lmax.disruptor.dsl.Disruptor;
 
 public class ParkingTicketsStats {
 
@@ -20,10 +29,11 @@ public class ParkingTicketsStats {
 	static final int UNUSED_BITS = 32 - BITS;
 	static final int SIZE = 1 << BITS;
 	static final int MASK = SIZE - 1;
+
 	static final String[] keys = new String[SIZE];
 	static final AtomicIntegerArray vals = new AtomicIntegerArray(SIZE);
 
-	public static int hash(final String k) {
+	public static final int hash(final String k) {
 		int h = 0;
 		try {
 			for (byte b : k.getBytes("UTF-8")) {
@@ -37,10 +47,11 @@ public class ParkingTicketsStats {
 		return h;
 	}
 
-	public static void add(final String k, final int d) {
+	public static final void add(final String k, final int d) {
 		int i = hash(k);
 		vals.addAndGet(i, d);
 
+// Uncomment block to enable hashing output
 //		String k0 = keys[i];
 //		if (k0 != null && !k0.equals(k)) {
 //			System.err.println("Key hash clash: first "+ k0 +" and "+ k);
@@ -49,79 +60,104 @@ public class ParkingTicketsStats {
 			keys[i] = k;
 //		}
 	}
-	public static int get(final String k) {
+
+	public static final int get(final String k) {
 		int i = hash(k);
 		return vals.get(i);
 	}
 
-    public static SortedMap<String, Integer> sortStreetsByProfitability(InputStream parkingTicketsStream) {
-    	printInterval("Initialization");
-
-    	String name = "([A-Z][A-Z][A-Z]+|ST [A-Z][A-Z][A-Z]+)";
-		Matcher nameMatcher = Pattern.compile(name).matcher("");
+    @SuppressWarnings("unchecked")
+	public static final SortedMap<String, Integer> sortStreetsByProfitability(InputStream parkingTicketsStream) {
+    	printInterval("Pre-entry initialization");
 
 		printProperty("os.arch");
     	System.out.println("InputStream is "+ parkingTicketsStream);
-    	//final Map<String, Integer> streets = new HashMap<String, Integer>();
-    	try {
-	    	BufferedReader r = new BufferedReader(new InputStreamReader(parkingTicketsStream));
-	    	r.readLine();	// discard header row
-	    	for(String line; (line = r.readLine()) != null; ) {
+
+        ExecutorService exec = Executors.newCachedThreadPool();
+
+        // Preallocate RingBuffer with 1024 ValueEvents
+        ClaimStrategy claimStrategy = new SingleThreadedClaimStrategy(256);
+        WaitStrategy waitStrategy = new YieldingWaitStrategy();
+        Disruptor<ValueEvent> disruptor = new Disruptor<ValueEvent>(ValueEvent.EVENT_FACTORY, exec, claimStrategy, waitStrategy);
+
+        final EventHandler<ValueEvent> handler = new EventHandler<ValueEvent>() {
+            // event will eventually be recycled by the Disruptor after it wraps
+            public void onEvent(final ValueEvent event, final long sequence, final boolean endOfBatch) throws Exception {
+            	System.out.println("Thread: "+ Thread.currentThread().getId());
+            	String line = event.getValue();
 	    		String[] parts = line.split(",");
+//		    	String tag_number_masked = parts[0];
+//		    	String date_of_infraction = parts[1];
+//		    	String infraction_code = parts[2];
+//		    	String infraction_description = parts[3];
+	    		String sfa = parts[4];
+	    		Integer set_fine_amount = 0;
 	    		try {
-//		    		String tag_number_masked = parts[0];
-//		    		String date_of_infraction = parts[1];
-//		    		String infraction_code = parts[2];
-//		    		String infraction_description = parts[3];
-		    		String sfa = parts[4];
-		    		Integer set_fine_amount = 0;
-		    		try {
-			    		set_fine_amount = Integer.parseInt(sfa);
-		    		}
-		    		catch (NumberFormatException e) {
-		    			System.out.print(e.getClass().getSimpleName() +": "+ sfa);
-		    		}
-//		    		String time_of_infraction = parts[5];
-//		    		String location1 = parts[6];
-		    		String location2 = parts[7];
-//		    		String location3 = parts[8];
-//		    		String location4 = parts[9];
-		    		nameMatcher.reset(location2);
-		    		if (nameMatcher.find()) {
-		    			String l = nameMatcher.group();
+		    		set_fine_amount = Integer.parseInt(sfa);
+	    		}
+	    		catch (NumberFormatException e) {
+	    			System.out.print(e.getClass().getSimpleName() +": "+ sfa);
+	    		}
+//		    	String time_of_infraction = parts[5];
+//		    	String location1 = parts[6];
+	    		String location2 = parts[7];
+//		    	String location3 = parts[8];
+//		    	String location4 = parts[9];
+
+	    		Matcher nameMatcher = event.nameMatcher;
+	    		nameMatcher.reset(location2);
+	    		if (nameMatcher.find()) {
+	    			String l = nameMatcher.group();
 //	    			streetMatcher.reset(location2);
 //	    			if (streetMatcher.find()) {
 //	    				String l = streetMatcher.group(2);
 	    			/*
-			    	//	l = l.replaceAll("[0-9]+", "");
-			    		l = l.replaceAll("[^A-Z]+ ", "");
-			    		l = l.replaceAll(" (N|NORTH|S|SOUTH|W|WEST|E|EAST)$", "");
-			    		l = l.replaceAll(" (AV|AVE|AVENUE|BLVD|CRES|COURT|CRT|DR|RD|ST|STR|STREET|WAY)$", "");
-			    	//	l = l.replaceAll("^(A|M) ", "");
-			    		l = l.replaceAll("(^| )(PARKING) .*$", "");
-			    		l = l.trim();
-		    		*/
-//			    		String province = parts[10];
-		    			add(l, set_fine_amount);
+		    	//	l = l.replaceAll("[0-9]+", "");
+		    		l = l.replaceAll("[^A-Z]+ ", "");
+		    		l = l.replaceAll(" (N|NORTH|S|SOUTH|W|WEST|E|EAST)$", "");
+		    		l = l.replaceAll(" (AV|AVE|AVENUE|BLVD|CRES|COURT|CRT|DR|RD|ST|STR|STREET|WAY)$", "");
+		    	//	l = l.replaceAll("^(A|M) ", "");
+		    		l = l.replaceAll("(^| )(PARKING) .*$", "");
+		    		l = l.trim();
+    			 	*/
+//			    	String province = parts[10];
+	    			add(l, set_fine_amount);
 
-//		    			if (!l.equals("KING") && (location2.indexOf(" KING ") >= 0 || location2.endsWith(" KING"))) {
-//		    				System.out.println(l +" <- "+ location2);
-//		    			}
-	    			}
-	    			else {
-	    				if (location2.indexOf("KING") >= 0 && location2.indexOf("PARKING") == -1) {
-		    				System.out.println(""+ location2);
-	    				}
-	    			}
-	    		}
-	    		catch (ArrayIndexOutOfBoundsException e) {
-	    			System.out.println(e.getClass().getSimpleName() +": "+ line);
-	    		}
+//		    		if (!l.equals("KING") && (location2.indexOf(" KING ") >= 0 || location2.endsWith(" KING"))) {
+//		    			System.out.println(l +" <- "+ location2);
+//		    		}
+    			}
+    			else {
+    				if (location2.indexOf("KING") >= 0 && location2.indexOf("PARKING") == -1) {
+	    				System.out.println(""+ location2);
+    				}
+    			}
+            //	System.out.println("Sequence: " + sequence);
+            //	System.out.println("ValueEvent: " + line);
+            }
+        };
+
+        // Build dependency graph
+        disruptor.handleEventsWith(handler);
+        RingBuffer<ValueEvent> ringBuffer = disruptor.start();
+
+    	try {
+	    	BufferedReader r = new BufferedReader(new InputStreamReader(parkingTicketsStream));
+	    	r.readLine();	// discard header row
+	    	for (String line; (line = r.readLine()) != null; ) {
+	            // Two phase commit. Grab one of the slots
+	            long seq = ringBuffer.next();
+	            ValueEvent valueEvent = ringBuffer.get(seq);
+	            valueEvent.setValue(line);
+	            ringBuffer.publish(seq);
 	    	}
     	}
     	catch (IOException e) {
 			e.printStackTrace();
 		}
+
+        disruptor.shutdown();
+        exec.shutdown();
 
     	printInterval("Read and summed");
 
@@ -135,7 +171,8 @@ public class ParkingTicketsStats {
 			}});
 
     	for (int i = 0; i < SIZE; i++) {
-    		for (int v; (v = vals.get(i)) != 0; ) {
+    		int v;
+    		if ((v = vals.get(i)) != 0) {
     			sorted.put(keys[i], v);
     		}
     	}
