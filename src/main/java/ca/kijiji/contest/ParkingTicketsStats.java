@@ -3,10 +3,13 @@ package ca.kijiji.contest;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.util.AbstractMap;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
-import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -130,6 +133,7 @@ public class ParkingTicketsStats {
 			e.printStackTrace();
 		}
 
+/*
     	final SortedMap<String, Integer> sorted = new TreeMap<String, Integer>(new Comparator<String>() {
 			public int compare(final String o1, final String o2) {
 				final int c = get(o2) - get(o1);
@@ -172,6 +176,8 @@ public class ParkingTicketsStats {
     	try { t1.join(); } catch (final InterruptedException e) {}
 
     	printInterval("Populated TreeSet");
+*/
+    	final SortedMap<String, Integer> sorted = new SelectSortedMap();
 
         return sorted;
     }
@@ -198,14 +204,19 @@ public class ParkingTicketsStats {
 
 	public static void add(final String k, final int d) {
 		final int i = hash(k);
+
 		vals.addAndGet(i, d);
+
+		if (keys.get(i) == null) {
+			keys.set(i, k.intern());
+		}
 
 //		String k0 = keys[i];
 //		if (k0 != null && !k0.equals(k)) {
 //			println("Key hash clash: first "+ k0 +" and "+ k);
 //		}
 //		else {
-			keys.set(i, k);
+//			keys.set(i, k);
 //		}
 	}
 	public static int get(final String k) {
@@ -310,5 +321,118 @@ public class ParkingTicketsStats {
                 return new StartEndEvent();
             }
         };
+    }
+
+    protected final static class SelectSortedMap implements SortedMap<String, Integer> {
+    	private final Comparator<String> comparator = new Comparator<String>() {
+			public int compare(final String a, final String b) {
+				final int c = get(b) - get(a);
+				if (c != 0) return c;
+				return a.compareTo(b);
+			}};
+
+		public Comparator<? super String> comparator() {
+			return comparator;
+		}
+
+		public SortedMap<String, Integer> subMap(String fromKey, String toKey) {
+			return null;
+		}
+
+		public SortedMap<String, Integer> headMap(String toKey) {
+			return null;
+		}
+
+		public SortedMap<String, Integer> tailMap(String fromKey) {
+			return null;
+		}
+
+		public String firstKey() {
+			String maxKey = null;
+			int maxVal = Integer.MIN_VALUE;
+	    	for (int i = 0; i < SIZE; i++) {
+	    		final int v = vals.get(i);
+	    		if (v != 0 && v >= maxVal) {
+	    			maxVal = v;
+	    			maxKey = keys.get(i);
+	    		}
+	    	}
+			return maxKey;
+		}
+
+		public String lastKey() {
+			String minKey = null;
+			int minVal = Integer.MAX_VALUE;
+	    	for (int i = 0; i < SIZE; i++) {
+	    		final int v = vals.get(i);
+	    		if (v != 0 && v <= minVal) {
+	    			minVal = v;
+	    			minKey = keys.get(i);
+	    		}
+	    	}
+			return minKey;
+		}
+
+		public Set<java.util.Map.Entry<String, Integer>> entrySet() {
+			Set<java.util.Map.Entry<String, Integer>> entries = new TreeSet<Entry<String, Integer>>();
+	    	for (int i = 0; i < SIZE; i++) {
+	    		final int v = vals.get(i);
+	    		if (v != 0) {
+	    			entries.add(new AbstractMap.SimpleEntry<String, Integer>(keys.get(i), v));
+	    		}
+	    	}
+			return entries;
+		}
+
+		public int size() {
+			return 0;
+		}
+
+		public boolean isEmpty() {
+			return false;
+		}
+
+		public boolean containsKey(Object key) {
+			return false;
+		}
+
+		public boolean containsValue(Object value) {
+			return false;
+		}
+
+		public Integer get(Object key) {
+			if (key instanceof String) {
+				String k = ((String) key).intern();
+
+		    	for (int i = 0; i < SIZE; i++) {
+		    		if (k == keys.get(i)) {
+		    			return vals.get(i);
+		    		}
+		    	}
+			}
+			return null;
+		}
+
+		public Integer put(String key, Integer value) {
+			return null;
+		}
+
+		public Integer remove(Object key) {
+			return null;
+		}
+
+		public void putAll(Map<? extends String, ? extends Integer> m) {
+		}
+
+		public void clear() {
+		}
+
+		public Set<String> keySet() {
+			return null;
+		}
+
+		public Collection<Integer> values() {
+			return null;
+		}
     }
 }
