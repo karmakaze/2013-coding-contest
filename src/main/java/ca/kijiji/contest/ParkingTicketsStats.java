@@ -1,8 +1,5 @@
 package ca.kijiji.contest;
 
-import gnu.trove.map.hash.TObjectIntHashMap;
-import gnu.trove.procedure.TObjectIntProcedure;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
@@ -11,7 +8,9 @@ import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,9 +36,10 @@ public class ParkingTicketsStats {
 
 	static final Pattern namePattern = Pattern.compile("([A-Z][A-Z][A-Z]+|ST [A-Z][A-Z][A-Z]+)");
 
-    static final int nWorkers = 4;
+    static final int nWorkers = 8;
 //	static final TObjectIntHashMap<String>[] maps = new TObjectIntHashMap[nWorkers];
-	static final TObjectIntHashMap<String> themap = new TObjectIntHashMap(20000);
+//	static final TObjectIntHashMap<String> themap = new TObjectIntHashMap(20000);
+	static final ConcurrentHashMap<String, AtomicInteger> themap = new ConcurrentHashMap<String, AtomicInteger>(10000);
 
     public static SortedMap<String, Integer> sortStreetsByProfitability(final InputStream parkingTicketsStream) {
     	printInterval("Pre-entry initialization");
@@ -56,7 +56,7 @@ public class ParkingTicketsStats {
 	        final Worker workers[] = new Worker[nWorkers];
 
 	        for (int t = 0; t < nWorkers; t++) {
-	        	queues[t] = new ArrayBlockingQueue<>(512);
+	        	queues[t] = new ArrayBlockingQueue<>(1024);
 	//        	maps[t] = new TObjectIntHashMap(15000);
 	        	workers[t] = new Worker(queues[t], themap);
 	        	workers[t].start();
@@ -172,11 +172,11 @@ public class ParkingTicketsStats {
     public final static class Worker extends Thread {
     	public volatile long pad7, pad6, pad5, pad4, pad3, pad2, pad1;
 		private final ArrayBlockingQueue<Long> queue;
-		private final TObjectIntHashMap<String> map;
+		private final ConcurrentHashMap<String, AtomicInteger> map;
 		private final Matcher nameMatcher = namePattern.matcher("");
 		public volatile long Pad1, Pad2, Pad3, Pad4, Pad5, Pad6, Pad7;
 
-		public Worker(final ArrayBlockingQueue<Long> queue, final TObjectIntHashMap<String> map) {
+		public Worker(final ArrayBlockingQueue<Long> queue, final ConcurrentHashMap<String, AtomicInteger> map) {
 			this.queue = queue;
 			this.map = map;
 			pad7 = pad6 = pad5 = pad4 = pad3 = pad2 = pad1 = 7;
@@ -242,8 +242,9 @@ public class ParkingTicketsStats {
 		    		nameMatcher.reset(location2);
 		    		if (nameMatcher.find()) {
 		    			final String name = nameMatcher.group();
-		    			synchronized (map) {
-			    			map.adjustOrPutValue(name, amount, amount);
+		    			final AtomicInteger a = themap.putIfAbsent(name, new AtomicInteger(amount));
+		    			if (a != null) {
+			    			a.addAndGet(amount);
 		    			}
 					}
 					else {
@@ -268,22 +269,22 @@ public class ParkingTicketsStats {
 				}
 			});
 
-			final TObjectIntHashMap<String> map = themap;
-			map.forEachEntry(new TObjectIntProcedure<String>() {
-				public boolean execute(final String k, final int v) {
-					final Integer i = get(k);
-					if (i == null) {
-						put(k, v);
-					} else {
-						put(k,  i+v);
-					}
-					return true;
-				}});
+			final ConcurrentHashMap<String, AtomicInteger> map = themap;
+			for (final Map.Entry<String, AtomicInteger> me : themap.entrySet()) {
+//			map.forEachEntry(new TObjectIntProcedure<String>() {
+//				public boolean execute(final String k, final int v) {
+					final String k = me.getKey();
+					final int i = me.getValue().get();
+//					final Integer i = get(k);
+					put(k, i);
+			}
+//					return true;
+//				}});
 		}
 
 		private static Integer getMerged(final Object key) {
 			int v = 0;
-			v = themap.get(key);
+			v = themap.get(key).get();
 //			for (final TObjectIntHashMap<String> map : maps) {
 //				v += map.get(key);
 //			}
