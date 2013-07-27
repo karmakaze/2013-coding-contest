@@ -38,6 +38,7 @@ public class ParkingTicketsStatsTest {
         947, 953, 967, 971, 977, 983, 991, 997}) {
         parkingTicketsStream.reset();
        	ParkingTicketsStats.hashfact = p;
+       	ParkingTicketsStats.setHashSeed(p * 997 + p);
        	ParkingTicketsStats.clashes.set(0);
         final SortedMap<String, Integer> streets = ParkingTicketsStats.sortStreetsByProfitability(parkingTicketsStream);
 

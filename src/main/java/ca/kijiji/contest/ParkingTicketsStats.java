@@ -16,9 +16,12 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.google.common.hash.HashFunction;
+import com.google.common.hash.Hashing;
+
 public class ParkingTicketsStats {
 
-	// 24-bit indices (16M possible entries)
+	// 23-bit indices (4M possible entries)
 	static final int BITS = 23;
 	static final int UNUSED_BITS = 32 - BITS;
 	static final int SIZE = 1 << BITS;
@@ -286,23 +289,74 @@ public class ParkingTicketsStats {
     public static int hashfact = 47;
     public static AtomicInteger clashes = new AtomicInteger(0);
 
+    public static volatile HashFunction murmur3 = Hashing.murmur3_32();
+    public static void setHashSeed(int seed) {
+    	murmur3 = Hashing.murmur3_32(seed);
+    }
+
 	public static int hash(final String k) {
+		int h = 0;
+		try {
+			h = murmur3.hashBytes(k.getBytes("UTF-8")).asInt();
+		} catch (UnsupportedEncodingException e) {}
+/*
 		int h = 0;
 		try {
 			for (final byte b : k.getBytes("UTF-8")) {
 				if (b != ' ') {
-					if (h < 0 || h > MASK) {
-						h = (h ^ (h >>> BITS)) & MASK;
-					}
-					final int c = (b == ' ') ? 0 : (int)b & 0x00FF - 64;
-					h = (h * hashfact + c);
+					h <<= 4;
+					final int c = (b == ' ') ? 0 : (int)b & 0x00FF - 65;
+					h += c;
+					h = (h ^ (h >>> BITS)) & MASK;
 				}
 			}
 		}
 		catch (final UnsupportedEncodingException e) {}
-
+*/
 		return h & MASK;
 	}
+
+	public static int murmurHash2(byte[] data, int seed) {
+        // 'm' and 'r' are mixing constants generated offline.
+        // They're not really 'magic', they just happen to work well.
+        int m = 0x5bd1e995;
+        int r = 24;
+
+        // Initialize the hash to a 'random' value
+        int len = data.length;
+        int h = seed ^ len;
+
+        int i = 0;
+        while (len  >= 4) {
+            int k = data[i + 0] & 0xFF;
+            k |= (data[i + 1] & 0xFF) << 8;
+            k |= (data[i + 2] & 0xFF) << 16;
+            k |= (data[i + 3] & 0xFF) << 24;
+
+            k *= m;
+            k ^= k >>> r;
+            k *= m;
+
+            h *= m;
+            h ^= k;
+
+            i += 4;
+            len -= 4;
+        }
+
+        switch (len) {
+        case 3: h ^= (data[i + 2] & 0xFF) << 16;
+        case 2: h ^= (data[i + 1] & 0xFF) << 8;
+        case 1: h ^= (data[i + 0] & 0xFF);
+                h *= m;
+        }
+
+        h ^= h >>> 13;
+        h *= m;
+        h ^= h >>> 15;
+
+        return h;
+    }
 
 	public static void add(final String k, final int d) {
 		final int i = hash(k);

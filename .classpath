@@ -12,5 +12,6 @@
 	<classpathentry kind="lib" path="lib/hppc-0.5.2.jar"/>
 	<classpathentry kind="lib" path="lib/trove-3.0.3.jar"/>
 	<classpathentry kind="lib" path="lib/disruptor-2.10.4.jar"/>
+	<classpathentry kind="lib" path="lib/guava-14.0.1.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
