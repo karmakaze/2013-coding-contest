@@ -38,8 +38,8 @@ public class ParkingTicketsStats {
 	static final Pattern namePattern = Pattern.compile("([A-Z][A-Z][A-Z]+|ST [A-Z][A-Z][A-Z]+)");
 
     static final int nWorkers = 4;
-//	static final TObjectIntHashMap<String>[] maps = new TObjectIntHashMap[nWorkers];
-	static final TObjectIntHashMap<String> themap = new TObjectIntHashMap(20000);
+	static final TObjectIntHashMap<String>[] maps = new TObjectIntHashMap[nWorkers];
+//	static final TObjectIntHashMap<String> themap = new TObjectIntHashMap(20000);
 
     public static SortedMap<String, Integer> sortStreetsByProfitability(final InputStream parkingTicketsStream) {
     	printInterval("Pre-entry initialization");
@@ -57,8 +57,8 @@ public class ParkingTicketsStats {
 
 	        for (int t = 0; t < nWorkers; t++) {
 	        	queues[t] = new ArrayBlockingQueue<>(512);
-	//        	maps[t] = new TObjectIntHashMap(15000);
-	        	workers[t] = new Worker(queues[t], themap);
+	        	maps[t] = new TObjectIntHashMap(15000);
+	        	workers[t] = new Worker(queues[t], maps[t]);
 	        	workers[t].start();
 	        }
 
@@ -172,8 +172,6 @@ public class ParkingTicketsStats {
     	public volatile long pad7, pad6, pad5, pad4, pad3, pad2, pad1;
 		private final ArrayBlockingQueue<Long> queue;
 
-		private volatile TIntArrayList fines = new TIntArrayList(40960);
-		private volatile ArrayList<String> locations = new ArrayList<>(40960);
 		private final TObjectIntHashMap<String> map;
 		private final Matcher nameMatcher = namePattern.matcher("");
 		public volatile long Pad1, Pad2, Pad3, Pad4, Pad5, Pad6, Pad7;
@@ -188,62 +186,64 @@ public class ParkingTicketsStats {
         public final void run() {
 			// local access faster than volatile fields
 			final byte[] data = ParkingTicketsStats.data;
+			final TIntArrayList fines = new TIntArrayList(819200);
+			final ArrayList<String> locations = new ArrayList<>(819200);
 
 			for (;;) {
-				final long ij;
+				final long block_start_end;
 				try {
-					ij = queue.poll(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+					block_start_end = queue.poll(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
 				}
 				catch (final InterruptedException e) {
 					e.printStackTrace();
 					continue;
 				}
 
-				if (ij == 0) {
+				if (block_start_end == 0) {
 					break;
 				}
 
-				int i = (int)(ij >>> 32);
-    			final int j = (int)ij;
+				final int block_start = (int)(block_start_end >>> 32);
+    			final int block_end = (int)block_start_end;
 
-				// process block
-				for (int m; i < j; i = m) {
-					// process a line
-					m = i;
-					while (m < j && data[m++] != (byte)'\n') {}
+				// process block as fields
+				// save fields 4 (set_fine_amount) and 7 (location2)
+    			int start = block_start;
+				int column = 0;
+	    		int fine = 0;
+	    		String location = null;
+				while (start < block_end) {
+					// find a field data[start, end)
+					int end = start;
+					while (end < block_end && data[end] != ',' && data[end] != '\n') { end++; }
 
-					// split out fields 4 (set_fine_amount) and 7 (location2)
-		    		int fine = 0;
-		    		String location = null;
+					if (column == 4) {
+			    		final String set_fine_amount = new String(data, start, end - start);
 
-					int k;
-					int c = 0;
-					do {
-						k = i;
-						while (k < m && data[k] != ',' && data[k] != '\n') { k++; }
-						if (c == 4) {
-				    		final String set_fine_amount = new String(data, i, k - i);
-
-			    			// parse fine
-				    		try {
-					    		fine = Integer.parseInt(set_fine_amount);
-				    		}
-				    		catch (final NumberFormatException e) {
-				    			System.out.print(e.getClass().getSimpleName() +": "+ set_fine_amount);
-				    		}
+		    			// parse fine
+			    		try {
+				    		fine = Integer.parseInt(set_fine_amount);
+			    		}
+			    		catch (final NumberFormatException e) {
+			    			System.out.print(e.getClass().getSimpleName() +": "+ set_fine_amount);
+			    		}
+					}
+					else if (column == 7) {
+						if (fine > 0) {
+				    		location = new String(data, start, end - start);
+				    		fines.add(fine);
+				    		locations.add(location);
 						}
-						else if (c == 7) {
-							if (fine > 0) {
-					    		location = new String(data, i, k - i);
-					    		fines.add(fine);
-					    		locations.add(location);
-							}
-						}
-						c++;
-						i = k + 1;
-					} while (i < m);
+					}
+					column++;
+					if (end < block_end & data[end] == '\n') {
+						column = 0;
+					}
+					start = end + 1;
 				}
 			}
+
+			println("fines/locations: size="+ fines.size() +" "+ locations.size());
 
 			int i = 0;
 			for (final String location : locations) {
@@ -253,9 +253,7 @@ public class ParkingTicketsStats {
 	    			final String name = nameMatcher.group();
     				final int fine = fines.get(i);
 
-	    			synchronized (map) {
-		    			map.adjustOrPutValue(name, fine, fine);
-	    			}
+	    			map.adjustOrPutValue(name, fine, fine);
 				}
 	    		i++;
 			}
@@ -274,25 +272,26 @@ public class ParkingTicketsStats {
 				}
 			});
 
-			final TObjectIntHashMap<String> map = themap;
-			map.forEachEntry(new TObjectIntProcedure<String>() {
-				public boolean execute(final String k, final int v) {
-					final Integer i = get(k);
-					if (i == null) {
-						put(k, v);
-					} else {
-						put(k,  i+v);
-					}
-					return true;
-				}});
+			for (final TObjectIntHashMap<String> map : maps) {
+				map.forEachEntry(new TObjectIntProcedure<String>() {
+					public boolean execute(final String k, final int v) {
+						final Integer i = get(k);
+						if (i == null) {
+							put(k, v);
+						} else {
+							put(k,  i+v);
+						}
+						return true;
+					}});
+			}
 		}
 
 		private static int getMerged(final Object key) {
 			int v = 0;
-			v = themap.get(key);
-//			for (final TObjectIntHashMap<String> map : maps) {
-//				v += map.get(key);
-//			}
+//			v = themap.get(key);
+			for (final TObjectIntHashMap<String> map : maps) {
+				v += map.get(key);
+			}
 			return v;
 		}
 	}
