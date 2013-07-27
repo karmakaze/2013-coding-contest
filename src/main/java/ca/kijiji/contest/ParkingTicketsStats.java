@@ -1,11 +1,13 @@
 package ca.kijiji.contest;
 
+import gnu.trove.list.array.TIntArrayList;
 import gnu.trove.map.hash.TObjectIntHashMap;
 import gnu.trove.procedure.TObjectIntProcedure;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.SortedMap;
@@ -19,11 +21,9 @@ import java.util.regex.Pattern;
  * Pipeline decomposition:
  * - InputStream
  * - byte[] blocks
- * - lines
- * - fields (e.g. fine, location)
+ * - Strings (set_fine_amount, location2)
  * - parse fine, location
  * - hash location
- *
  */
 public class ParkingTicketsStats {
 
@@ -70,10 +70,6 @@ public class ParkingTicketsStats {
     			a += c;
     			i = j;
     			j = a;
-    			if (a < available) {
-    				while (data[--j] != '\n') {}
-        			j++;
-    			}
 
     			// don't offer the first (header) row
     			if (i == 0) {
@@ -82,7 +78,10 @@ public class ParkingTicketsStats {
     				while (data[i++] != '\n') {};
     			}
 
-				while (data[--j] != '\n') {}
+    			if (a < available) {
+    				while (data[--j] != '\n') {}
+        			j++;
+    			}
 
 				final long ij = (long)i << 32 | (long)j & 0x00ffffffff;
 				try {
@@ -172,6 +171,9 @@ public class ParkingTicketsStats {
     public final static class Worker extends Thread {
     	public volatile long pad7, pad6, pad5, pad4, pad3, pad2, pad1;
 		private final ArrayBlockingQueue<Long> queue;
+
+		private volatile TIntArrayList fines = new TIntArrayList(40960);
+		private volatile ArrayList<String> locations = new ArrayList<>(40960);
 		private final TObjectIntHashMap<String> map;
 		private final Matcher nameMatcher = namePattern.matcher("");
 		public volatile long Pad1, Pad2, Pad3, Pad4, Pad5, Pad6, Pad7;
@@ -211,8 +213,8 @@ public class ParkingTicketsStats {
 					while (m < j && data[m++] != (byte)'\n') {}
 
 					// split out fields 4 (set_fine_amount) and 7 (location2)
-		    		String set_fine_amount = "0";
-		    		String location2 = "";
+		    		int fine = 0;
+		    		String location = null;
 
 					int k;
 					int c = 0;
@@ -220,39 +222,42 @@ public class ParkingTicketsStats {
 						k = i;
 						while (k < m && data[k] != ',' && data[k] != '\n') { k++; }
 						if (c == 4) {
-							set_fine_amount = new String(data, i, k - i);
+				    		final String set_fine_amount = new String(data, i, k - i);
+
+			    			// parse fine
+				    		try {
+					    		fine = Integer.parseInt(set_fine_amount);
+				    		}
+				    		catch (final NumberFormatException e) {
+				    			System.out.print(e.getClass().getSimpleName() +": "+ set_fine_amount);
+				    		}
 						}
 						else if (c == 7) {
-				    		location2 = new String(data, i, k - i);
+							if (fine > 0) {
+					    		location = new String(data, i, k - i);
+					    		fines.add(fine);
+					    		locations.add(location);
+							}
 						}
 						c++;
 						i = k + 1;
 					} while (i < m);
-
-	    			// parse fine
-		    		int amount = 0;
-		    		try {
-			    		amount = Integer.parseInt(set_fine_amount);
-		    		}
-		    		catch (final NumberFormatException e) {
-		    			System.out.print(e.getClass().getSimpleName() +": "+ set_fine_amount);
-		    		}
-
-		    		// parse location2
-		    		nameMatcher.reset(location2);
-		    		if (nameMatcher.find()) {
-		    			final String name = nameMatcher.group();
-		    			synchronized (map) {
-			    			map.adjustOrPutValue(name, amount, amount);
-		    			}
-					}
-					else {
-						// name could not be parsed, print out select subset of these errors
-						if (location2.indexOf("KING") >= 0 && location2.indexOf("PARKING") == -1) {
-		    				println(""+ location2);
-						}
-					}
 				}
+			}
+
+			int i = 0;
+			for (final String location : locations) {
+	    		// parse location
+	    		nameMatcher.reset(location);
+	    		if (nameMatcher.find()) {
+	    			final String name = nameMatcher.group();
+    				final int fine = fines.get(i);
+
+	    			synchronized (map) {
+		    			map.adjustOrPutValue(name, fine, fine);
+	    			}
+				}
+	    		i++;
 			}
         }
     }
@@ -261,10 +266,11 @@ public class ParkingTicketsStats {
 	public static final class MergeMap extends TreeMap<String, Integer> {
 		public MergeMap() {
 			super(new Comparator<String>() {
-				public int compare(final String o1, final String o2) {
-					final int c = getMerged(o2) - getMerged(o1);
+				// order by value descending, name ascending
+				public int compare(final String a, final String b) {
+					final int c = getMerged(b) - getMerged(a);
 					if (c != 0) return c;
-					return o2.compareTo(o1);
+					return b.compareTo(a);
 				}
 			});
 
@@ -281,7 +287,7 @@ public class ParkingTicketsStats {
 				}});
 		}
 
-		private static Integer getMerged(final Object key) {
+		private static int getMerged(final Object key) {
 			int v = 0;
 			v = themap.get(key);
 //			for (final TObjectIntHashMap<String> map : maps) {
