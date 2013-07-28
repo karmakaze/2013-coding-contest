@@ -297,7 +297,7 @@ public class ParkingTicketsStats {
 	public static int hash(final String k) {
 		int h = 0;
 		try {
-			h = murmur3.hashBytes(k.getBytes("UTF-8")).asInt();
+			h = murmur3.hashBytes(k.replace(" ", "").getBytes("UTF-8")).asInt();
 		} catch (UnsupportedEncodingException e) {}
 /*
 		int h = 0;

@@ -25,9 +25,11 @@ public class ParkingTicketsStatsTest {
     public void testSortStreetsByProfitability() throws Exception {
         final long startTime = System.currentTimeMillis();
 
+        java.util.Random rand = new java.util.Random();
+
         final InputStream parkingTicketsStream = this.getClass().getResourceAsStream(PARKING_TAGS_DATA_2012_CSV_PATH);
         parkingTicketsStream.mark(256 * 1024 * 1024);
-        for (final int p : new int[] {29, 31, 37, 41, 43, 47,53,59, 61, 67, 71,
+        for (int p : new int[] {29, 31, 37, 41, 43, 47,53,59, 61, 67, 71,
         73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173,
         179, 181, 191, 193, 197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281,
         283, 293, 307, 311, 313, 317, 331, 337, 347, 349, 353, 359, 367, 373, 379, 383, 389, 397, 401, 409,
@@ -37,6 +39,7 @@ public class ParkingTicketsStatsTest {
         811, 821, 823, 827, 829, 839, 853, 857, 859, 863, 877, 881, 883, 887, 907, 911, 919, 929, 937, 941,
         947, 953, 967, 971, 977, 983, 991, 997}) {
         parkingTicketsStream.reset();
+        p = rand.nextInt();
        	ParkingTicketsStats.hashfact = p;
        	ParkingTicketsStats.setHashSeed(p * 997 + p);
        	ParkingTicketsStats.clashes.set(0);
