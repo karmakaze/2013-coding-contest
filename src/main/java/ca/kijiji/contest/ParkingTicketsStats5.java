@@ -13,6 +13,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import lobstre.chtrie.ConcurrentHashTrieMap;
+
 import com.googlecode.concurrenttrees.common.KeyValuePair;
 import com.googlecode.concurrenttrees.radix.ConcurrentRadixTree;
 import com.googlecode.concurrenttrees.radix.node.concrete.DefaultCharArrayNodeFactory;
@@ -29,7 +31,8 @@ public class ParkingTicketsStats5 {
 	// use small blocking queue size to limit read-ahead for higher cache hits
 	static final ArrayBlockingQueue<int[]> byteArrayQueue = new ArrayBlockingQueue<int[]>(2 * nWorkers - 3, true);
 //	static final int SIZE = 12800;
-    static final ConcurrentRadixTree<AtomicInteger> ctrie = new ConcurrentRadixTree<AtomicInteger>(new DefaultCharArrayNodeFactory(), false); // 8770
+//  static final ConcurrentRadixTree<AtomicInteger> ctrie = new ConcurrentRadixTree<AtomicInteger>(new DefaultCharArrayNodeFactory(), false); // 8770
+	static final ConcurrentHashTrieMap<String, AtomicInteger> ctrie = new ConcurrentHashTrieMap<String, AtomicInteger>(3);
 	static final int[] END_OF_WORK = new int[0];
 
 	static volatile boolean wasrun;
@@ -144,13 +147,13 @@ public class ParkingTicketsStats5 {
 
     	final SortedMap<String, Integer> sorted = new TreeMap<String, Integer>(new Comparator<String>() {
 			public int compare(String o1, String o2) {
-				int c = ctrie.getValueForExactKey(o2).intValue() - ctrie.getValueForExactKey(o1).intValue();
+				int c = ctrie.get(o2).intValue() - ctrie.get(o1).intValue();
 				if (c != 0) return c;
 				return o2.compareTo(o1);
 			}});
 
-    	for (KeyValuePair<AtomicInteger> kv : ctrie.getKeyValuePairsForKeysStartingWith("")) {
-    		sorted.put(kv.getKey().toString(), kv.getValue().intValue());
+    	for (Map.Entry<String, AtomicInteger> kv : ctrie.entrySet()) {
+    		sorted.put(kv.getKey(), kv.getValue().intValue());
     	}
 
 //    	Thread[] threads = new Thread[2];
