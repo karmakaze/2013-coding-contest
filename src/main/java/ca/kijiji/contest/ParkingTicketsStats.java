@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -13,6 +12,10 @@ import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * ParkingTicketStats
+ * @author Keith Kim
+ */
 public class ParkingTicketsStats {
 
 	// 23-bit indices (8M possible entries)
@@ -34,17 +37,18 @@ public class ParkingTicketsStats {
 	static final int[] END_OF_WORK = new int[0];
 
     public static SortedMap<String, Integer> sortStreetsByProfitability(InputStream parkingTicketsStream) {
-    	printInterval("Pre-initialization");
-
     	if (data != null) {
-	    	for (int i = 0; i < SIZE; i++) {
-	    		Arrays.fill(keys, 0);
-	    		vals.set(i, 0);
+    		Arrays.fill(keys, null);
+
+	    	for (int h = 0; h < SIZE; h++) {
+	    		vals.set(h, 0);
 	    	}
     	}
 
     	try {
 			final int available = parkingTicketsStream.available();
+
+    		data = new byte[available];
 
 			Thread[] workers = new Thread[nWorkers];
 			for (int k = 0; k < nWorkers; k++) {
@@ -53,37 +57,26 @@ public class ParkingTicketsStats {
 						worker();
 					}
 				};
+				workers[k].start();
 			}
-
-    		data = new byte[available];
-
-    		for (Thread t : workers) {
-	    		t.start();
-    		}
 
     		int read_end = 0;
     		int block_start = 0;
     		int block_end = 0;
-    		for (int read_amount = 4 * 1024 * 1024; (read_amount = parkingTicketsStream.read(data, read_end, read_amount)) > 0; ) {
+    		for (int read_amount = 1 * 1024 * 1024; (read_amount = parkingTicketsStream.read(data, read_end, read_amount)) > 0; ) {
     			read_end += read_amount;
     			block_start = block_end;
     			block_end = read_end;
 
     			// don't offer the first (header) row
     			if (block_start == 0) {
-    		    	printInterval("First read");
     				while (data[block_start++] != '\n') {}
     			}
-    			else {
-    		    	//printInterval("Read "+ read_end);
-    			}
 
+    			// partially read line will be processed on next iteration
     			if (read_end < available) {
     				while (data[--block_end] != '\n') {}
         			block_end++;
-    			}
-    			else {
-    	        	printInterval("Completed reading");
     			}
 
     			// subdivide block to minimize latency and improve work balancing
@@ -112,8 +105,6 @@ public class ParkingTicketsStats {
     			}
     		}
 
-        	printInterval("Completed queuing work");
-
     		for (int t = 0; t < nWorkers; t++) {
     			try {
 					byteArrayQueue.put(END_OF_WORK);
@@ -123,8 +114,7 @@ public class ParkingTicketsStats {
 				}
     		}
 
-        	printInterval("Completed queuing End-of-Work");
-
+    		// wait for workers to finish processing last unit
 	    	for (Thread t: workers) {
 	    		try {
 					t.join();
@@ -132,8 +122,6 @@ public class ParkingTicketsStats {
 					e.printStackTrace();
 				}
 	    	}
-
-        	printInterval("Threads completed");
     	}
     	catch (IOException e) {
 			e.printStackTrace();
@@ -167,12 +155,10 @@ public class ParkingTicketsStats {
         	threads[t].start();
     	}
 
-    	printInterval("Started gatherers");
-
     	for (Thread thread : threads) {
 	    	try { thread.join(); } catch (InterruptedException e) {}
     	}
-    	printInterval("Gatherers completed");
+
         return sorted;
     }
 
@@ -250,13 +236,11 @@ public class ParkingTicketsStats {
 	public static int hash(String k) {
 		int h = 0;
 		for (char c : k.toCharArray()) {
-			if (h < 0 || h > MASK) {
-				h = (h & MASK) ^ (h >>> BITS);
-			}
-			int i = (c == ' ') ? 0 : (int)c & 0x00FF - 64;
-			h = h * 47 + i;
+			int i = (c == ' ') ? 0 : ((int)c - 64) & 0x00FF;
+			h = h * 443 + i;
+			h = (h & MASK) ^ (h >>> BITS);
 		}
-		return h & MASK;
+		return h;
 	}
 
 	public static void add(final String k, final int d) {
@@ -283,28 +267,4 @@ public class ParkingTicketsStats {
 		int i = hash(k);
 		return vals.get(i);
 	}
-
-    static volatile long lastTime = System.currentTimeMillis();
-
-    public static void printInterval(String name) {
-    	long time = System.currentTimeMillis();
-    	println(time, name +": "+ (time - lastTime) +" ms");
-    	lastTime = time;
-    }
-
-    public static void printElement(String key, Map<String, Integer> streets) {
-    	println(key +": $"+ streets.get(key));
-    }
-
-    public static void printProperty(String name) {
-		println(name +": "+ System.getProperty(name));
-    }
-
-    public static void println(long time, String line) {
-    	println(time%10000 +" "+ line);
-    }
-
-    public static void println(String line) {
-    	System.out.println(line);
-    }
 }
