@@ -26,6 +26,8 @@ public class ParkingTicketsStats {
 
     	case 4: return ParkingTicketsStats4.sortStreetsByProfitability(parkingTicketsStream);
 
+    	case 5: return ParkingTicketsStats5.sortStreetsByProfitability(parkingTicketsStream);
+
         default: throw new IllegalStateException("Selected algorithm "+ algorithm +" has no implementation.");
     	}
     }
