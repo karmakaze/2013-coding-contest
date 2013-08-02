@@ -15,7 +15,7 @@ public class OpenStringIntHashMap {
 	private final String[] keys;
 	private final long[] hashAndValues; // each long is value << 32 | hash
 
-	private final ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock(true);
+	private final ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock(false);
 	private final ReadLock readLock = readWriteLock.readLock();
 	private final WriteLock writeLock = readWriteLock.writeLock();
 	public volatile long Pad1, Pad2, Pad3, Pad4, Pad5, Pad6, Pad7;
