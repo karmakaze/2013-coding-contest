@@ -1,23 +1,23 @@
 package ca.kijiji.contest;
 
-import java.io.UnsupportedEncodingException;
 import java.util.Arrays;
 import java.util.Map;
-
-import com.google.common.hash.HashFunction;
-import com.google.common.hash.Hashing;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock.ReadLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
 
 public class OpenStringIntHashMap {
 	public volatile long pad7, pad6, pad5, pad4, pad3, pad2, pad1;
 
-	public final int NO_ELEMENT_VALUE = 0;
+	public final int NO_ELEMENT_VALUE = Integer.MIN_VALUE;
 
 	private final int capacity;
 	private final String[] keys;
 	private final long[] hashAndValues; // each long is value << 32 | hash
 
-	private final HashFunction murmur3 = Hashing.murmur3_32();
-
+	private final ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock(true);
+	private final ReadLock readLock = readWriteLock.readLock();
+	private final WriteLock writeLock = readWriteLock.writeLock();
 	public volatile long Pad1, Pad2, Pad3, Pad4, Pad5, Pad6, Pad7;
 
 	public OpenStringIntHashMap(int capacity) {
@@ -29,14 +29,20 @@ public class OpenStringIntHashMap {
 	}
 
 	public void clear() {
-		synchronized (keys) {
+		writeLock.lock(); try
+		{
 			Arrays.fill(keys, 0);
 			Arrays.fill(hashAndValues, 0);
 		}
+		finally { writeLock.unlock(); }
 	}
 
 	public int get(String key) {
-		int hash = hash(key);
+		return get(key, new char[256]);
+	}
+
+	public int get(String key, char[] keybuf) {
+		int hash = hash(key, keybuf);
 		int cur = hash % capacity;
 		if (cur < 0) cur += capacity;
 
@@ -48,7 +54,11 @@ public class OpenStringIntHashMap {
 	}
 
 	public void put(String key, int value) {
-		int hash = hash(key);
+		put(key, value, new char[256]);
+	}
+
+	public void put(String key, int value, char[] keybuf) {
+		int hash = hash(key, keybuf);
 		int cur = hash % capacity;
 		if (cur < 0) cur += capacity;
 
@@ -59,8 +69,8 @@ public class OpenStringIntHashMap {
 		}
 	}
 
-	public void adjustOrPutValue(String key, int value) {
-		int hash = hash(key);
+	public void adjustOrPutValue(String key, int value, char[] keybuf) {
+		int hash = hash(key, keybuf);
 		int cur = hash % capacity;
 		if (cur < 0) cur += capacity;
 
@@ -69,7 +79,6 @@ public class OpenStringIntHashMap {
 				throw new IllegalStateException("Exceeded capacity "+ capacity);
 			}
 		}
-
 	}
 
 	/**
@@ -82,22 +91,27 @@ public class OpenStringIntHashMap {
 		for (; cur < end; cur++) {
 			long vh = hashAndValues[cur];
 			int h = (int) vh;
-			if (h  == hash) {
-				synchronized (keys) {
+			if (h == hash) {
+				readLock.lock(); try
+				{
 					return (int) (hashAndValues[cur] >>> 32);
 				}
+				finally { readLock.unlock(); }
 			}
 			else if (h == 0) {
-				synchronized (keys) {
+				readLock.lock(); try
+				{
 					do {
 						vh = hashAndValues[cur];
 						h = (int) vh;
-						if (h  == hash) {
+						if (h == hash) {
 							return (int) (vh >>> 32);
 						}
 					} while (h != 0 && ++cur < end);
+
+					return NO_ELEMENT_VALUE;
 				}
-				return NO_ELEMENT_VALUE;
+				finally { readLock.unlock(); }
 			}
 		}
 		return NO_ELEMENT_VALUE;
@@ -108,27 +122,40 @@ public class OpenStringIntHashMap {
 			long vh = hashAndValues[cur];
 			int h = (int) vh;
 			if (h == hash) {
-				synchronized (keys) {
-					hashAndValues[cur] = (long)value << 32 | (long)h & 0x00FFFFFFFF;
+				writeLock.lock(); try
+				{
+					hashAndValues[cur] = (long)value << 32 | (long)hash & 0x00FFFFFFFF;
+					return true;
 				}
-				return true;
+				finally { writeLock.unlock(); }
 			}
 			else if (h == 0) {
-				synchronized (keys) {
-					do {
-						vh = hashAndValues[cur];
-						h = (int) vh;
-						if (h == hash) {
-							hashAndValues[cur] = (long)value << 32 | (long)h & 0x00FFFFFFFF;
+				readLock.lock();
+				do {
+					vh = hashAndValues[cur];
+					h = (int) vh;
+					if (h == hash) {
+						readLock.unlock();
+						writeLock.lock(); try
+						{
+							hashAndValues[cur] = (long)value << 32 | (long)hash & 0x00FFFFFFFF;
 							return true;
 						}
-						else if (h == 0) {
-							hashAndValues[cur] = (long)value << 32 | (long)h & 0x00FFFFFFFF;
+						finally { writeLock.unlock(); }
+					}
+					else if (h == 0) {
+						readLock.unlock();
+						writeLock.lock(); try
+						{
+							hashAndValues[cur] = (long)value << 32 | (long)hash & 0x00FFFFFFFF;
 							keys[cur] = key;
 							return true;
 						}
-					} while (++cur < end);
-				}
+						finally { writeLock.unlock(); }
+					}
+				} while (++cur < end);
+
+				readLock.unlock();
 				return false;
 			}
 		}
@@ -140,26 +167,40 @@ public class OpenStringIntHashMap {
 			long vh = hashAndValues[cur];
 			int h = (int) vh;
 			if (h == hash) {
-				synchronized (keys) {
+				writeLock.lock(); try
+				{
 					hashAndValues[cur] += (long)value << 32;
+					return true;
 				}
-				return true;
+				finally { writeLock.unlock(); }
 			}
 			else if (h == 0) {
-				synchronized (keys) {
-					do {
-						vh = hashAndValues[cur];
-						h = (int) vh;
-						if (h == hash) {
+				readLock.lock();
+				do {
+					vh = hashAndValues[cur];
+					h = (int) vh;
+					if (h == hash) {
+						readLock.unlock();
+						writeLock.lock(); try
+						{
 							hashAndValues[cur] += (long)value << 32;
 							return true;
-						} else if (h == 0) {
-							hashAndValues[cur] = (long)value << 32 | (long)h & 0x00FFFFFFFF;
+						}
+						finally { writeLock.unlock(); }
+					}
+					else if (h == 0) {
+						readLock.unlock();
+						writeLock.lock(); try
+						{
+							hashAndValues[cur] = (long)value << 32 | (long)hash & 0x00FFFFFFFF;
 							keys[cur] = key;
 							return true;
 						}
-					} while (++cur < end);
-				}
+						finally {  writeLock.unlock(); }
+					}
+				} while (++cur < end);
+
+				readLock.unlock();
 				return false;
 			}
 		}
@@ -171,7 +212,8 @@ public class OpenStringIntHashMap {
 	}
 
 	protected void putRangeTo(int cur, int end, Map<String, Integer> dest) {
-		synchronized (keys) {
+		readLock.lock(); try
+		{
 			String key;
 			for (; cur < end; cur++) {
 				if ((key = keys[cur]) != null) {
@@ -181,17 +223,18 @@ public class OpenStringIntHashMap {
 				}
 			}
 		}
+		finally { readLock.unlock(); }
 	}
 
-	private int hash(String key) {
-		try {
-			int h = murmur3.hashBytes(key.getBytes("UTF-8")).asInt();
-			if (h == 0) h = capacity;
-			return h;
+	private int hash(String key, char[] keybuf) {
+		int h = 0;
+		int l = key.length();
+		key.getChars(0, l, keybuf, 0);
+		for (; --l >= 0;) {
+			char c = keybuf[l];
+			int i = (c == ' ') ? 0 : (int)c & 0x00FF - 64;
+			h = h * 47 + i;
 		}
-		catch (UnsupportedEncodingException e) {
-			e.printStackTrace();
-			return 0;
-		}
+		return h;
 	}
 }

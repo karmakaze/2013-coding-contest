@@ -21,9 +21,9 @@ public class ParkingTicketsStats4 {
 	static final int nWorkers = Runtime.getRuntime().availableProcessors();
 
 	// use small blocking queue size to limit read-ahead for higher cache hits
-	static final ArrayBlockingQueue<int[]> byteArrayQueue = new ArrayBlockingQueue<int[]>(2 * nWorkers - 3, true);
-	static final int SIZE = 12800;
-    static final OpenStringIntHashMap themap = new OpenStringIntHashMap(SIZE); // 8770
+	static final ArrayBlockingQueue<int[]> byteArrayQueue = new ArrayBlockingQueue<int[]>(2 * nWorkers - 1, true);
+	static final int SIZE = 12 * 1024;
+    static final OpenStringIntHashMap themap = new OpenStringIntHashMap(SIZE); // 8772
 	static final int[] END_OF_WORK = new int[0];
 
 	static volatile boolean wasrun;
@@ -167,6 +167,8 @@ public class ParkingTicketsStats4 {
      */
     static final void worker() {
 		Matcher nameMatcher = namePattern.matcher("");
+		StringBuilder location = new StringBuilder();
+		char[] keybuf = new char[256];
 
 		for (;;) {
 			int[] block_start_end;
@@ -192,37 +194,44 @@ public class ParkingTicketsStats4 {
 			int start = block_start;
 			int column = 0;
 			int fine = 0;
-			String location = null;
+
 			// process block
 			while (start < block_end) {
 				int end = start;
-				while (end < block_end && data[end] != ',' && data[end] != '\n') { end++; }
 
 				if (column == 4) {
-		    		final String set_fine_amount = new String(data, start, end - start);
-		    		try {
-			    		fine = Integer.parseInt(set_fine_amount);
-		    		}
-		    		catch (final NumberFormatException e) {
-		    			System.out.print(e.getClass().getSimpleName() +": "+ set_fine_amount);
-		    		}
+					while (end < block_end && data[end] != ',' && data[end] != '\n') { end++; }
+
+//					// position 'start' at start of number
+//					while ((data[start] < '0' || data[start] > '9') && start < end) start++;
+
+					while (start < end && (data[start] >= '0' && data[start] <= '9')) {
+						fine = fine * 10 + (data[start] - '0');
+						start++;
+					}
 				}
 				else if (column == 7) {
+					while (end < block_end && data[end] != ',' && data[end] != '\n') { end++; }
+
 					if (fine > 0) {
-						location = new String(data, start, end - start);
+						for (location.setLength(0); start < end; ) {
+							location.append((char) data[start++]);
+						}
 
 			    		nameMatcher.reset(location);
 			    		if (nameMatcher.find()) {
 			    			final String name = nameMatcher.group();
-			    			themap.adjustOrPutValue(name, fine);
+			    			themap.adjustOrPutValue(name, fine, keybuf);
 		    			}
 					}
+				}
+				else {
+					while (end < block_end && data[end] != ',' && data[end] != '\n') { end++; }
 				}
 
 				column++;
 				if (end < block_end && data[end] == '\n') {
 					fine = 0;
-					location = null;
 					column = 0;
 				}
 				start = end + 1;

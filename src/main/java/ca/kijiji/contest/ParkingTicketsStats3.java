@@ -171,6 +171,7 @@ public class ParkingTicketsStats3 {
         public final void run() {
 			// local access faster than volatile fields
 			final byte[] data = ParkingTicketsStats3.data;
+			final char[] keybuf = new char[256];
 
 			for (;;) {
 				final long block_start_end;
@@ -217,7 +218,7 @@ public class ParkingTicketsStats3 {
 				    		nameMatcher.reset(location);
 				    		if (nameMatcher.find()) {
 				    			final String name = nameMatcher.group();
-				    			map.adjustOrPutValue(name, fine);
+				    			map.adjustOrPutValue(name, fine, keybuf);
 							}
 						}
 					}
