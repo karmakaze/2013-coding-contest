@@ -2,19 +2,26 @@ package ca.kijiji.contest;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.AbstractMap.SimpleEntry;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
-import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class ParkingTicketsStats {
 
-	static final byte[] data = new byte[4 * 1024 * 1024];
+	static final byte[] data = new byte[2 * 1024 * 1024];
 
 	static final Pattern namePattern = Pattern.compile("([A-Z][A-Z][A-Z]+|ST [A-Z][A-Z][A-Z]+)");
 
@@ -23,8 +30,9 @@ public class ParkingTicketsStats {
 
 	// use small blocking queue size to limit read-ahead for higher cache hits
 	static final ArrayBlockingQueue<int[]> byteArrayQueue = new ArrayBlockingQueue<int[]>(2 * nWorkers - 1, false);
-	static final int SIZE = 16 * 1024;
 	static final int[] END_OF_WORK = new int[0];
+
+	static final ConcurrentHashMap<String, AtomicInteger> themap = new ConcurrentHashMap<>(12800, 0.8f, 8);
 
     public static SortedMap<String, Integer> sortStreetsByProfitability(InputStream parkingTicketsStream) {
     	printInterval("Pre-initialization");
@@ -35,7 +43,7 @@ public class ParkingTicketsStats {
 			final int available = parkingTicketsStream.available();
 
 			for (int k = 0; k < nWorkers; k++) {
-				workers[k] = new Worker("worker"+ k, SIZE, byteArrayQueue, END_OF_WORK);
+				workers[k] = new Worker("worker"+ k, byteArrayQueue, END_OF_WORK);
 				workers[k].start();
 			}
 
@@ -123,38 +131,13 @@ public class ParkingTicketsStats {
 
     	printInterval("Workers done");
 
-    	// merge results
-    	for (int i = 1; i < nWorkers; i++) {
-    		workers[i].mergeTo(workers[0]);
+    	List<Map.Entry<String, Integer>> list = new ArrayList<>(12800);
+
+    	for (Map.Entry<String, AtomicInteger> me : themap.entrySet()) {
+    		list.add(new SimpleEntry<String, Integer>(me.getKey(), me.getValue().intValue()));
     	}
 
-    	printInterval("Sequentially merged");
-
-    	final Worker worker0 = workers[0];
-
-    	final SortedMap<String, Integer> sorted = new TreeMap<String, Integer>(new Comparator<String>() {
-			public int compare(String k1, String k2) {
-				int c = worker0.map.get(k2) - worker0.map.get(k1);
-				if (c != 0) return c;
-				return k1.compareTo(k2);
-			}});
-
-    	Thread[] threads = new Thread[2];
-    	for (int t = 0; t < 2; t++) {
-    		final int start = t == 0 ? 0 : SIZE/2;
-    		final int end = t == 0 ? SIZE/2 : SIZE;
-
-        	threads[t] = new Thread(null, null, "gather"+ t, 2048) {
-        		public void run() {
-    				worker0.map.putRangeTo(start, end, sorted);
-        		}
-        	};
-        	threads[t].start();
-    	}
-
-    	for (Thread thread : threads) {
-	    	try { thread.join(); } catch (InterruptedException e) {}
-    	}
+    	final SortedMap<String, Integer> sorted = new ValueKeySortedMap<String, Integer>(list);
 
     	printInterval("Ordered");
 
@@ -164,12 +147,10 @@ public class ParkingTicketsStats {
     static class Worker extends Thread {
     	private final int[] END_OF_WORK;
     	private final BlockingQueue<int[]> queue;
-    	private final OpenStringIntHashMap map;
 
-    	Worker(String name, int capacity, BlockingQueue<int[]> queue, int[] END_OF_WORK) {
+    	Worker(String name, BlockingQueue<int[]> queue, int[] END_OF_WORK) {
     		this.queue = queue;
     		this.END_OF_WORK = END_OF_WORK;
-    		map = new OpenStringIntHashMap(capacity);
     	}
 
         /**
@@ -178,6 +159,8 @@ public class ParkingTicketsStats {
     	public final void run() {
     		final Matcher nameMatcher = namePattern.matcher("");
     		final StringBuilder location = new StringBuilder();
+
+    		AtomicInteger v = new AtomicInteger();
 
     		for (;;) {
     			int[] block_start_end;
@@ -226,7 +209,13 @@ public class ParkingTicketsStats {
     			    		nameMatcher.reset(location);
     			    		if (nameMatcher.find()) {
     			    			final String name = nameMatcher.group();
-    			    			map.adjustOrPutValue(name, fine);
+    			    			AtomicInteger v0 = themap.putIfAbsent(name, v);
+    			    			if (v0 == null) {
+    			    				v.addAndGet(fine);
+    			    				v = new AtomicInteger();
+    			    			} else {
+				    				v0.addAndGet(fine);
+    			    			}
     		    			}
     					}
     				}
@@ -242,11 +231,56 @@ public class ParkingTicketsStats {
     			}
     		}
         }
-
-    	public final void mergeTo(Worker dest) {
-    		map.mergeTo(dest.map);
-    	}
     }
+
+    public static class ValueKeySortedMap<K extends Comparable<K>, V extends Comparable<V>>
+					    extends LinkedHashMap<K, V> implements SortedMap<K, V> {
+
+    	final ArrayList<Map.Entry<K, V>> list;
+
+    	final Comparator<Map.Entry<K, V>> comparator = new Comparator<Map.Entry<K, V>>() {
+				public int compare(Entry<K, V> e1, Entry<K, V> e2) {
+					int c = e2.getValue().compareTo(e1.getValue());
+					if (c != 0) return c;
+					return e1.getKey().compareTo(e2.getKey());
+			}};
+
+		public ValueKeySortedMap(Collection<Map.Entry<K, V>> entries) {
+			list = new ArrayList<Map.Entry<K, V>>(entries);
+
+	    	Collections.sort(list, comparator);
+
+    		for (Map.Entry<? extends K, ? extends V> me : entries) {
+    			super.put(me.getKey(), me.getValue());
+    		}
+    	}
+		public Comparator<? super K> comparator() {
+			return new Comparator<K>() {
+				public int compare(K k1, K k2) {
+					int c = get(k2).compareTo(get(k1));
+					if (c != 0) return c;
+					return k1.compareTo(k2);
+				}};
+		}
+		public SortedMap<K, V> subMap(K fromKey, K toKey) {
+			int fromIndex = Collections.<Map.Entry<K, V>>binarySearch(list, new SimpleEntry(fromKey, get(fromKey)), comparator);
+			int toIndex = Collections.<Map.Entry<K, V>>binarySearch(list, new SimpleEntry(toKey, get(toKey)), comparator);
+			return new ValueKeySortedMap<>(list.subList(fromIndex, toIndex));
+		}
+		public SortedMap<K, V> headMap(K toKey) {
+			return subMap(null, toKey);
+		}
+		public SortedMap<K, V> tailMap(K fromKey) {
+			return subMap(fromKey, null);
+		}
+		public K firstKey() {
+			return list.get(0).getKey();
+		}
+		public K lastKey() {
+			return list.get(list.size() - 1).getKey();
+		}
+		private static final long serialVersionUID = -7794035165242839160L;
+	};
 
     static volatile long lastTime = System.currentTimeMillis();
 
