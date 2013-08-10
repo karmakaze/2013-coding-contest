@@ -202,13 +202,8 @@ public class ParkingTicketsStats {
     					while (end < block_end && data[end] != ',' && data[end] != '\n') { end++; }
 
     					if (fine > 0) {
-    						for (location.setLength(0); start < end; ) {
-    							location.append((char) data[start++]);
-    						}
-
-    			    		nameMatcher.reset(location);
-    			    		if (nameMatcher.find()) {
-    			    			final String name = nameMatcher.group();
+    			    		if (extractStreetName(data, start, end, location)) {
+    			    			final String name = location.toString();
     			    			AtomicInteger v0 = themap.putIfAbsent(name, v);
     			    			if (v0 == null) {
     			    				v.addAndGet(fine);
@@ -281,6 +276,31 @@ public class ParkingTicketsStats {
 		}
 		private static final long serialVersionUID = -7794035165242839160L;
 	};
+
+    static final boolean extractStreetName(byte[] data, int start, int end, StringBuilder output) {
+    	output.setLength(0);
+    	int count = 0;
+		for (int i = start; i < end; i++) {
+			if (data[i] >= 'A' && data[i] <= 'Z') {
+				output.append((char) data[i]);
+				count++;
+			}
+			else if (data[i] == ' ') {
+				if (count == 2 && output.charAt(0) == 'S' && output.charAt(1) == 'T') {
+					output.append((char) data[i]);
+					count++;
+				}
+				else if (count > 2) {
+					break;
+				}
+				else {
+					output.setLength(0);
+					count = 0;
+				}
+			}
+		}
+		return count > 2;
+    }
 
     static volatile long lastTime = System.currentTimeMillis();
 
