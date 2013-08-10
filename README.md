@@ -8,5 +8,7 @@ Repository Notes
 
 - The ['closed-L2'](https://github.com/karmakaze/2013-coding-contest/tree/closed-L2) branch uses private arrays: long[] for packed value|hash, and String[] for keys. These are later merged (sequential merge ~7ms). Uses only 4 worker threads to use L2 effectively rather than 8 threads' registers. Runtime ~414ms (where 41ms is final ordering which can certainly be improved).
 
+- The ['chm'](https://github.com/karmakaze/2013-coding-contest/tree/chm) branch uses a ConcurrentHashMap<String, AtomicInteger> and is an attempt to be the simplest datastructure with good performance. This is perhaps better done with a ConcurrentMap<CharSequence, AtomicInteger> where the 'key' is a StringBuilder/StringBuffer/CharBuffer which is reused and only if the key was newly added is a new one allocated.
+
 Cheers,
 -Keith
