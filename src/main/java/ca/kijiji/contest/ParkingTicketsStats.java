@@ -279,22 +279,39 @@ public class ParkingTicketsStats {
     static final boolean extractStreetName(byte[] data, int start, int end, StringBuilder output) {
     	output.setLength(0);
     	int count = 0;
+    	boolean letter = false;
 		for (int i = start; i < end; i++) {
-			if (data[i] >= 'A' && data[i] <= 'Z') {
-				output.append((char) data[i]);
+			char c = (char) data[i];
+			if (c >= 'A' && c <= 'Z') {
+				output.append((char) c);
+				letter = true;
 				count++;
 			}
-			else if (data[i] == ' ') {
-				if (count == 2 && output.charAt(0) == 'S' && output.charAt(1) == 'T') {
-					output.append((char) data[i]);
+			else if (c >= '0' && c <= '9') {
+				output.append((char) c);
+				count++;
+			}
+			else if (c == ' ') {
+				if (count > 3) {
+					if (letter) {
+						break;
+					}
+					output.setLength(0);
+					count = 0;
+					letter = false;
+				}
+				else if (count == 2 && output.charAt(0) == 'S' && output.charAt(1) == 'T'
+					  || count == 3 && output.charAt(0) == 'T' && output.charAt(1) == 'H' && output.charAt(2) == 'E') {
+					output.append((char) c);
 					count++;
 				}
-				else if (count > 2) {
+				else if (count == 3 && letter) {
 					break;
 				}
 				else {
 					output.setLength(0);
 					count = 0;
+					letter = false;
 				}
 			}
 		}
