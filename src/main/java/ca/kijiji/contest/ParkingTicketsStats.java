@@ -17,14 +17,14 @@ import java.util.concurrent.TimeUnit;
 
 public class ParkingTicketsStats {
 
-	static final byte[] data = new byte[4 * 1024 * 1024];
+	static final byte[] data = new byte[1 * 1024 * 1024];
 
 	// 4-cores with HyperThreading sets nThreads = 8
 	static final int nWorkers = 4; // Runtime.getRuntime().availableProcessors();
 
 	// use small blocking queue size to limit read-ahead for higher cache hits
 	static final ArrayBlockingQueue<int[]> byteArrayQueue = new ArrayBlockingQueue<int[]>(2 * nWorkers - 1, false);
-	static final int SIZE = 16 * 1024;
+	static final int SIZE = 20 * 1024 + 1;
 	static final int[] END_OF_WORK = new int[0];
 
     public static SortedMap<String, Integer> sortStreetsByProfitability(InputStream parkingTicketsStream) {
@@ -127,7 +127,7 @@ public class ParkingTicketsStats {
         		int read_end = 0;
         		int block_start = 0;
         		int block_end = 0;
-        		for (int read_amount = 256 * 1024; (read_amount = parkingTicketsStream.read(data, read_end, read_amount)) > 0; ) {
+        		for (int read_amount = 128 * 1024; (read_amount = parkingTicketsStream.read(data, read_end, read_amount)) > 0; ) {
         			bytes_read += read_amount;
         			read_end += read_amount;
         			block_start = block_end;
@@ -323,6 +323,6 @@ public class ParkingTicketsStats {
     }
 
     public static void println(String line) {
-    	System.out.println(line);
+//    	System.out.println(line);
     }
 }
