@@ -136,9 +136,7 @@ public class OpenStringIntHashMap {
 		for (String key; cur < end; cur++) {
 			if ((key = keys[cur]) != null) {
 				int v = (int) (valueHashes[cur] >>> 32);
-				synchronized (dest) {
-					dest.put(key, v);
-				}
+				dest.put(key, v);
 			}
 		}
 	}

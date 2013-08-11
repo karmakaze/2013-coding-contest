@@ -6,9 +6,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.SortedMap;
-import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,7 +34,6 @@ public class ParkingTicketsStats {
     	reader.start();
 
 		final Worker[] workers = new Worker[nWorkers];
-
 		for (int k = 0; k < nWorkers; k++) {
 			workers[k] = new Worker("worker"+ k, SIZE, byteArrayQueue, END_OF_WORK);
 			workers[k].start();
@@ -54,7 +53,7 @@ public class ParkingTicketsStats {
 
     	printInterval("Workers done");
 
-    	// merge results
+    	// merge results in pyramid manner
     	ExecutorService executor = Executors.newFixedThreadPool(4);
     	for (int step = 1; step < nWorkers; step *= 2) {
     		ArrayList<Future<?>> futures = new ArrayList<>();
@@ -81,17 +80,17 @@ public class ParkingTicketsStats {
 
     	final OpenStringIntHashMap map0 = workers[0].map;
 
-    	final SortedMap<String, Integer> sorted = new TreeMap<String, Integer>(new Comparator<String>() {
+    	final SortedMap<String, Integer> sorted = new ConcurrentSkipListMap<String, Integer>(new Comparator<String>() {
 			public int compare(String k1, String k2) {
 				int c = map0.get(k2) - map0.get(k1);
 				if (c != 0) return c;
 				return k1.compareTo(k2);
 			}});
 
-    	Thread[] threads = new Thread[2];
-    	for (int t = 0; t < 2; t++) {
-    		final int start = t == 0 ? 0 : SIZE/2;
-    		final int end = t == 0 ? SIZE/2 : SIZE;
+    	Thread[] threads = new Thread[nWorkers];
+    	for (int t = 0; t < nWorkers; t++) {
+    		final int start = SIZE * t / nWorkers;
+    		final int end = SIZE * (t+1) / nWorkers;
 
         	threads[t] = new Thread(null, null, "gather"+ t, 2048) {
         		public void run() {
@@ -105,7 +104,7 @@ public class ParkingTicketsStats {
 	    	try { thread.join(); } catch (InterruptedException e) {}
     	}
 
-    	printInterval("Ordered");
+    	printInterval("Parallel ordered");
 
         return sorted;
     }
