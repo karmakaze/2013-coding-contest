@@ -2,12 +2,17 @@ package ca.kijiji.contest;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 public class ParkingTicketsStats {
@@ -25,112 +30,60 @@ public class ParkingTicketsStats {
     public static SortedMap<String, Integer> sortStreetsByProfitability(InputStream parkingTicketsStream) {
     	printInterval("Pre-initialization");
 
-		Worker[] workers = new Worker[nWorkers];
+    	Thread reader = new Reader(parkingTicketsStream, byteArrayQueue);
+    	reader.start();
 
-    	try {
-			final int available = parkingTicketsStream.available();
+		final Worker[] workers = new Worker[nWorkers];
 
-			for (int k = 0; k < nWorkers; k++) {
-				workers[k] = new Worker("worker"+ k, SIZE, byteArrayQueue, END_OF_WORK);
-				workers[k].start();
-			}
+		for (int k = 0; k < nWorkers; k++) {
+			workers[k] = new Worker("worker"+ k, SIZE, byteArrayQueue, END_OF_WORK);
+			workers[k].start();
+		}
 
-        	printInterval("Initialization");
+    	printInterval("Initialization");
 
-    		int bytes_read = 0;
-    		int read_end = 0;
-    		int block_start = 0;
-    		int block_end = 0;
-    		for (int read_amount = 256 * 1024; (read_amount = parkingTicketsStream.read(data, read_end, read_amount)) > 0; ) {
-    			bytes_read += read_amount;
-    			read_end += read_amount;
-    			block_start = block_end;
-    			block_end = read_end;
-
-    			// don't offer the first (header) row
-    			if (bytes_read == read_amount) {
-    				printInterval("First read");
-    				while (data[block_start++] != '\n') {}
-    			}
-
-    			if (bytes_read < available) {
-    				while (data[--block_end] != '\n') {}
-        			block_end++;
-    			}
-
-    			// subdivide block to minimize latency and improve work balancing
-    			int sub_end = block_start;
-    			int sub_start;
-    			for (int k = 1; k <= nWorkers; k++) {
-    				sub_start = sub_end;
-    				if (k < nWorkers) {
-        				sub_end = block_start + (block_end - block_start) * k / nWorkers;
-    					while (data[--sub_end] != '\n') {}
-    					sub_end++;
-    				}
-    				else {
-        				sub_end = block_end;
-    				}
-        			for (;;) {
-    					try {
-    						byteArrayQueue.put(new int[] {sub_start, sub_end});
-    						break;
-    					}
-    					catch (InterruptedException e) {
-    						e.printStackTrace();
-    					}
-        			}
-    			}
-
-    			if (bytes_read == available) {
-    				break;
-    			}
-    			else if (available - bytes_read < read_amount) {
-    				read_amount = available - bytes_read;
-    			}
-
-    			if (read_end + read_amount > data.length) {
-    				System.arraycopy(data, block_end, data, 0, read_end - block_end);
-    				read_end -= block_end;
-    				block_start = block_end = 0;
-    			}
-    		}
-
-    		for (int t = 0; t < nWorkers; t++) {
-    			try {
-					byteArrayQueue.put(END_OF_WORK);
-				}
-    			catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-    		}
+		try {
+			reader.join();
 
 	    	for (Worker w: workers) {
-	    		try {
-					w.join();
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
+				w.join();
 	    	}
-    	}
-    	catch (IOException e) {
+		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
 
     	printInterval("Workers done");
 
     	// merge results
-    	for (int i = 1; i < nWorkers; i++) {
-    		workers[i].mergeTo(workers[0]);
+    	ExecutorService executor = Executors.newFixedThreadPool(4);
+    	for (int step = 1; step < nWorkers; step *= 2) {
+    		ArrayList<Future<?>> futures = new ArrayList<>();
+    		for (int j = 0; j < nWorkers; j += step*2) {
+				final Worker wj = workers[j];
+				if (j + step < nWorkers) {
+					final Worker w = workers[j + step];
+//					println("Merging worker "+ (j + step) +" into worker "+ j);
+					futures.add(executor.submit(new Runnable() { public void run() {
+	    	        		w.mergeTo(wj);
+						}}));
+				}
+    		}
+    		for (Future<?> f : futures) {
+    			try {
+					f.get();
+				} catch (InterruptedException | ExecutionException e) {
+					e.printStackTrace();
+				}
+    		}
     	}
 
-    	printInterval("Sequentially merged");
+    	printInterval("Parallel merged");
 
-    	final Worker worker0 = workers[0];
+    	final OpenStringIntHashMap map0 = workers[0].map;
 
     	final SortedMap<String, Integer> sorted = new TreeMap<String, Integer>(new Comparator<String>() {
 			public int compare(String k1, String k2) {
-				int c = worker0.map.get(k2) - worker0.map.get(k1);
+				int c = map0.get(k2) - map0.get(k1);
 				if (c != 0) return c;
 				return k1.compareTo(k2);
 			}});
@@ -142,7 +95,7 @@ public class ParkingTicketsStats {
 
         	threads[t] = new Thread(null, null, "gather"+ t, 2048) {
         		public void run() {
-    				worker0.map.putRangeTo(start, end, sorted);
+    				map0.putRangeTo(start, end, sorted);
         		}
         	};
         	threads[t].start();
@@ -155,6 +108,93 @@ public class ParkingTicketsStats {
     	printInterval("Ordered");
 
         return sorted;
+    }
+
+    static class Reader extends Thread {
+    	final InputStream parkingTicketsStream;
+    	final ArrayBlockingQueue<int[]> byteArrayQueue;
+
+    	Reader(InputStream parkingTicketsStream, ArrayBlockingQueue<int[]> byteArrayQueue) {
+    		this.parkingTicketsStream = parkingTicketsStream;
+    		this.byteArrayQueue = byteArrayQueue;
+    	}
+
+    	public void run() {
+        	try {
+    			final int available = parkingTicketsStream.available();
+
+        		int bytes_read = 0;
+        		int read_end = 0;
+        		int block_start = 0;
+        		int block_end = 0;
+        		for (int read_amount = 256 * 1024; (read_amount = parkingTicketsStream.read(data, read_end, read_amount)) > 0; ) {
+        			bytes_read += read_amount;
+        			read_end += read_amount;
+        			block_start = block_end;
+        			block_end = read_end;
+
+        			// don't offer the first (header) row
+        			if (bytes_read == read_amount) {
+        				printInterval("First read");
+        				while (data[block_start++] != '\n') {}
+        			}
+
+        			if (bytes_read < available) {
+        				while (data[--block_end] != '\n') {}
+            			block_end++;
+        			}
+
+        			// subdivide block to minimize latency and improve work balancing
+        			int sub_end = block_start;
+        			int sub_start;
+        			for (int k = 1; k <= nWorkers; k++) {
+        				sub_start = sub_end;
+        				if (k < nWorkers) {
+            				sub_end = block_start + (block_end - block_start) * k / nWorkers;
+        					while (data[--sub_end] != '\n') {}
+        					sub_end++;
+        				}
+        				else {
+            				sub_end = block_end;
+        				}
+            			for (;;) {
+        					try {
+        						byteArrayQueue.put(new int[] {sub_start, sub_end});
+        						break;
+        					}
+        					catch (InterruptedException e) {
+        						e.printStackTrace();
+        					}
+            			}
+        			}
+
+        			if (bytes_read == available) {
+        				break;
+        			}
+        			else if (available - bytes_read < read_amount) {
+        				read_amount = available - bytes_read;
+        			}
+
+        			if (read_end + read_amount > data.length) {
+        				System.arraycopy(data, block_end, data, 0, read_end - block_end);
+        				read_end -= block_end;
+        				block_start = block_end = 0;
+        			}
+        		}
+
+        		for (int t = 0; t < nWorkers; t++) {
+        			try {
+    					byteArrayQueue.put(END_OF_WORK);
+    				}
+        			catch (InterruptedException e) {
+    					e.printStackTrace();
+    				}
+        		}
+        	}
+        	catch (IOException e) {
+    			e.printStackTrace();
+    		}
+    	}
     }
 
     static class Worker extends Thread {
