@@ -234,8 +234,8 @@ public class ParkingTicketsStats {
 
     			// process block as fields
     			// save fields 4 (set_fine_amount) and 7 (location2)
-    			int start = block_start;
-    			int column = 0;
+    			int start = block_start + 18; // skip first 2 columns 8+1+8+1
+    			int column = 2;
     			int fine = 0;
     			// process block
     			while (start < block_end) {
@@ -264,7 +264,8 @@ public class ParkingTicketsStats {
 
     				column++;
     				if (end < block_end && data[end] == '\n') {
-    					column = 0;
+    					column = 2;
+    					end += 18; // skip first 2 columns 8+1+8+1
     				}
     				start = end + 1;
     			}
