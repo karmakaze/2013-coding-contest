@@ -22,12 +22,12 @@ public class OpenStringIntHashMap {
 		Pad1 = Pad2 = Pad3 = Pad4 = Pad5 = Pad6 = Pad7 = 7;
 	}
 
-	public void clear() {
+	public final void clear() {
 		Arrays.fill(keys, 0);
 		Arrays.fill(valueHashes, 0);
 	}
 
-	public int get(String key) {
+	public final int get(String key) {
 		int hash = hash(key);
 		int cur = hash % capacity;
 		if (cur < 0) cur += capacity;
@@ -39,7 +39,7 @@ public class OpenStringIntHashMap {
 		return v;
 	}
 
-	public void put(String key, int value) {
+	public final void put(String key, int value) {
 		int hash = hash(key);
 		int cur = hash % capacity;
 		if (cur < 0) cur += capacity;
@@ -51,8 +51,8 @@ public class OpenStringIntHashMap {
 		}
 	}
 
-	public void adjustOrPutValue(CharSequence key, int value) {
-		int hash = hash(key);
+	public final void adjustOrPutValue(final CharSequence key, final int value) {
+		final int hash = hash(key);
 		int cur = hash % capacity;
 		if (cur < 0) cur += capacity;
 
@@ -63,7 +63,7 @@ public class OpenStringIntHashMap {
 		}
 	}
 
-	public void mergeTo(OpenStringIntHashMap mergeTo) {
+	public final void mergeTo(OpenStringIntHashMap mergeTo) {
 		String key;
 		for (int cur = 0; cur < capacity; cur++) {
 			if ((key = keys[cur]) != null) {
@@ -79,7 +79,7 @@ public class OpenStringIntHashMap {
 	 * @param end
 	 * @return the found value with hash, otherwise NO_ELEMENT_VALUE
 	 */
-	private int scanValueHash(String key, int hash, int cur, int end) {
+	private final int scanValueHash(String key, int hash, int cur, int end) {
 		long vh;
 		do {
 			vh = valueHashes[cur];
@@ -92,7 +92,7 @@ public class OpenStringIntHashMap {
 		return NO_ELEMENT_VALUE;
 	}
 
-	private boolean put(String key, int hash, int value, int cur, int end) {
+	private final boolean put(final String key, final int hash, final int value, int cur, final int end) {
 		do {
 			long vh = valueHashes[cur];
 			int h = (int) vh;
@@ -110,12 +110,12 @@ public class OpenStringIntHashMap {
 		return false;
 	}
 
-	private final boolean adjustOrPutValue(CharSequence key, int hash, int value, int cur, int end) {
+	private final boolean adjustOrPutValue(final CharSequence key, final int hash, final int value, int cur, final int end) {
 		do {
 			long vh = valueHashes[cur];
 			int h = (int) vh;
 			if (h == hash) {
-				valueHashes[cur] += (long)value << 32;
+				valueHashes[cur] = vh + ((long)value << 32);
 				return true;
 			}
 			else if (h == 0) {
@@ -128,23 +128,25 @@ public class OpenStringIntHashMap {
 		return false;
 	}
 
-	public void putAllTo(Map<String, Integer> dest) {
+	public final void putAllTo(Map<String, Integer> dest) {
 		putRangeTo(0, capacity, dest);
 	}
 
-	protected void putRangeTo(int cur, int end, Map<String, Integer> dest) {
+	protected final void putRangeTo(int cur, int end, Map<String, Integer> dest) {
 		for (String key; cur < end; cur++) {
 			if ((key = keys[cur]) != null) {
-				int v = (int) (valueHashes[cur] >>> 32);
-				dest.put(key, v);
+				dest.put(key, (int) (valueHashes[cur] >>> 32));
 			}
 		}
 	}
 
-	private int hash(CharSequence key) {
+	/**
+	 * FNV-1 (Fowler–Noll–Vo) hash 32
+	 */
+	private final int hash(final CharSequence key) {
 		int hash = 0;
 
-		int l = key.length();
+		final int l = key.length();
 		for (int i = 0; i < l; i++) {
             hash = (16777619 * hash) ^ key.charAt(i);
  		}

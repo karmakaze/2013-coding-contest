@@ -24,7 +24,7 @@ public class ParkingTicketsStats {
 
 	// use small blocking queue size to limit read-ahead for higher cache hits
 	static final ArrayBlockingQueue<int[]> byteArrayQueue = new ArrayBlockingQueue<int[]>(2 * nWorkers - 1, false);
-	static final int SIZE = 20 * 1024 + 1;
+	static final int SIZE = 20 * 1024;
 	static final int[] END_OF_WORK = new int[0];
 
     public static SortedMap<String, Integer> sortStreetsByProfitability(InputStream parkingTicketsStream) {
@@ -81,7 +81,7 @@ public class ParkingTicketsStats {
     	final OpenStringIntHashMap map0 = workers[0].map;
 
     	final SortedMap<String, Integer> sorted = new ConcurrentSkipListMap<String, Integer>(new Comparator<String>() {
-			public int compare(String k1, String k2) {
+			public final int compare(String k1, String k2) {
 				int c = map0.get(k2) - map0.get(k1);
 				if (c != 0) return c;
 				return k1.compareTo(k2);
@@ -276,7 +276,7 @@ public class ParkingTicketsStats {
     	}
     }
 
-    static final boolean extractStreetName(byte[] data, int start, int end, StringBuilder output) {
+    static final boolean extractStreetName(final byte[] data, final int start, final int end, final StringBuilder output) {
     	output.setLength(0);
     	int count = 0;
     	boolean letter = false;
