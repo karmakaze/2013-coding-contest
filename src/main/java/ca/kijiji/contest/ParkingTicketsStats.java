@@ -17,14 +17,14 @@ import java.util.concurrent.TimeUnit;
 
 public class ParkingTicketsStats {
 
-	static final byte[] data = new byte[1 * 1024 * 1024];
+	static final byte[] data = new byte[2 * 1024 * 1024];
 
-	// 4-cores with HyperThreading sets nThreads = 8
-	static final int nWorkers = 4; // Runtime.getRuntime().availableProcessors();
+	// 4-cores with HyperThreading has 8 'availableProcessors()'
+	static final int nWorkers = Math.max(4, Runtime.getRuntime().availableProcessors() - 1);
 
 	// use small blocking queue size to limit read-ahead for higher cache hits
 	static final ArrayBlockingQueue<int[]> byteArrayQueue = new ArrayBlockingQueue<int[]>(2 * nWorkers - 1, false);
-	static final int SIZE = 20 * 1024;
+	static final int SIZE = 13 * 1024;
 	static final int[] END_OF_WORK = new int[0];
 
     public static SortedMap<String, Integer> sortStreetsByProfitability(InputStream parkingTicketsStream) {
