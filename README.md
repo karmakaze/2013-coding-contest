@@ -1,6 +1,6 @@
 Repository Notes
 ================
-- The 'master' branch has this updated README.md file and my favourite implementation 'closed-L2' merged in. After replacing the regex and using a CharSequence buffer rather than always making String objects for street names runs in ~240ms. Using the 'warm-up' test harness average times ~160ms. Parallel pyramid merge, sort with ConcurrentSkipListMap ~150ms. Skipping first 2 columns (18 bytes) ~125ms. With hyperthreading (7 workers) on Linux 3.2 64-bit kernel ~119-124ms.
+- The 'master' branch has this updated README.md file and my favourite implementation 'closed-L2' merged in. After replacing the regex and using a CharSequence buffer rather than always making String objects for street names runs in ~240ms. Using the 'warm-up' test harness average times ~160ms. Parallel pyramid merge, sort with ConcurrentSkipListMap ~150ms. Skipping first 2 columns (18 bytes) ~125ms. With hyperthreading (7 workers) on Linux 3.2 64-bit kernel ~118-124ms. (YMMV: highly tuned to my particular system Ivy Bridge i7 3.4GHz)
 
 - The ['submit'](https://github.com/karmakaze/2013-coding-contest/tree/submit) branch is what I actually submitted. It uses a large hash table with a 'perfect hash' function (but not a minimal perfect hash). The table is implemented with a String[] for the keys using lock-free writes and an AtomicIntegerArray for the values. Runtime ~513-540ms on Linux Core i7-3770 3.40GHz (~435ms with warm-up).
 
